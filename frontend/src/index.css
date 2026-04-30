@@ -1,0 +1,96 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --orange: #ff4500;
+  --blue: #0079d3;
+  --bg: #dae0e6;
+  --card: #ffffff;
+  --border: #edeff1;
+  --text: #1c1c1c;
+  --muted: #878a8c;
+  --danger: #ea0027;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+a { color: var(--blue); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+button {
+  cursor: pointer;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 16px;
+  font-size: 14px;
+  font-weight: 700;
+  transition: filter 0.15s;
+}
+button:hover { filter: brightness(0.9); }
+button:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.btn-primary { background: var(--blue); color: #fff; }
+.btn-orange  { background: var(--orange); color: #fff; }
+.btn-outline { background: transparent; border: 1px solid var(--blue); color: var(--blue); }
+.btn-danger  { background: var(--danger); color: #fff; }
+.btn-sm { padding: 4px 10px; font-size: 12px; }
+
+input, textarea, select {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+input:focus, textarea:focus, select:focus { border-color: var(--blue); }
+textarea { resize: vertical; min-height: 120px; }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px 16px;
+  display: flex;
+  gap: 24px;
+}
+
+.main-content { flex: 1; min-width: 0; }
+.sidebar { width: 312px; flex-shrink: 0; }
+
+.error-msg {
+  background: #ffd0d6;
+  border: 1px solid #f8b4be;
+  border-radius: 4px;
+  padding: 10px 14px;
+  color: var(--danger);
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+
+.success-msg {
+  background: #d4edda;
+  border: 1px solid #c3e6cb;
+  border-radius: 4px;
+  padding: 10px 14px;
+  color: #155724;
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+
+.loading { text-align: center; padding: 40px; color: var(--muted); }
+
+@media (max-width: 768px) {
+  .container { flex-direction: column; }
+  .sidebar { width: 100%; }
+}
