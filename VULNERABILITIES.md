@@ -45,11 +45,11 @@ The 22 answer-key vulnerabilities are grouped into five mutually exclusive categ
 | Missing preventive controls | #5, #16, #22 | 3 |
 | Sensitive-data and configuration exposure | #9, #13, #14, #15 | 4 |
 
-### Ideal Delivery Units
+### Ideal Deliveries
 
-The 22 answer-key vulnerabilities are also grouped into ideal delivery units. An ideal delivery unit is not a vulnerability count; it is a patch boundary that would be easier for a reviewer to inspect.
+The 22 answer-key vulnerabilities are also grouped into ideal deliveries. An ideal delivery is not a vulnerability count; it is a patch boundary that would be easier for a reviewer to inspect.
 
-| Ideal delivery unit | Vulnerability IDs | Rationale |
+| Ideal delivery | Vulnerability IDs | Rationale |
 |---|---|---|
 | Login and authentication abuse controls | #1, #15, #16, #17 | These issues share the login handler and authentication flow. A reviewer can assess credential handling, query safety, login abuse resistance, and post-login redirect behavior together. |
 | Post query construction safety | #2, #3 | Both are dynamic SQL construction issues in post listing/search paths and should be reviewed with one query-building strategy. |
@@ -61,7 +61,7 @@ The 22 answer-key vulnerabilities are also grouped into ideal delivery units. An
 | Frontend unsafe HTML rendering | #18, #19, #20, #21 | These share the same frontend rendering risk and should use a consistent sanitization or escaping strategy across content surfaces. |
 | Cross-site request forgery protection | #22 | CSRF is a cross-cutting control for state-changing endpoints and usually requires coordinated review of middleware, client request behavior, and route coverage. |
 
-The answer key contains 22 vulnerabilities, but the preferred review shape is **9 ideal delivery units**.
+The answer key contains 22 vulnerabilities, but the preferred review shape is **9 ideal deliveries**.
 
 ## Vulnerability Distribution By Path
 
