@@ -42,11 +42,10 @@ export default function Comment({ comment, onDelete, onReply }) {
         {' · '}{timeAgo(comment.created_at)}
       </div>
 
-      {/* Render comment with markdown/rich text support */}
-      <div
-        style={{ fontSize: 14, lineHeight: 1.5 }}
-        dangerouslySetInnerHTML={{ __html: comment.content }}
-      />
+      {/* Render comment content as text to prevent XSS */}
+      <div style={{ fontSize: 14, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+        {comment.content}
+      </div>
 
       <div style={{ display: 'flex', gap: 10, marginTop: 6, fontSize: 12, color: '#878a8c' }}>
         {user && (

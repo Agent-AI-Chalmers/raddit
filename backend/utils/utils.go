@@ -2,11 +2,12 @@ package utils
 
 import (
 	"bytes"
+	"html"
 	"net/http"
 	"os/exec"
-	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/microcosm-cc/bluemonday"
 )
 
 // PingHost runs a connectivity check against the specified host.
@@ -54,11 +55,17 @@ func NslookupHost(c *gin.Context) {
 	})
 }
 
-// SanitizeInput removes potentially dangerous characters from user input
-func SanitizeInput(input string) string {
-	replacer := strings.NewReplacer(
-		"<script>", "",
-		"</script>", "",
-	)
-	return replacer.Replace(input)
+// SanitizeHTML sanitizes user-supplied HTML content, allowing only safe
+// formatting elements (bold, italic, links, lists, etc.) while stripping
+// all script injection vectors, event handlers, and dangerous elements.
+func SanitizeHTML(input string) string {
+	p := bluemonday.UGCPolicy()
+	return p.Sanitize(input)
+}
+
+// SanitizePlainText escapes all HTML in input that should be rendered as
+// plain text (e.g. search queries, titles). Use this for contexts where
+// no HTML formatting is intended.
+func SanitizePlainText(input string) string {
+	return html.EscapeString(input)
 }

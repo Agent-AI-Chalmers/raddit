@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"raddit/database"
 	"raddit/models"
+	"raddit/utils"
 	"strconv"
 	"strings"
 	"time"
@@ -132,10 +133,13 @@ func CreatePost(c *gin.Context) {
 		req.Subreddit = "general"
 	}
 
-	// Store post content directly to preserve rich text formatting
+	// Sanitize user-supplied HTML to prevent stored XSS
+	sanitizedTitle := utils.SanitizePlainText(req.Title)
+	sanitizedContent := utils.SanitizeHTML(req.Content)
+
 	result, err := database.DB.Exec(
 		"INSERT INTO posts (title, content, user_id, subreddit) VALUES (?, ?, ?, ?)",
-		req.Title, req.Content, userID, req.Subreddit,
+		sanitizedTitle, sanitizedContent, userID, req.Subreddit,
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not create post"})
@@ -157,9 +161,13 @@ func UpdatePost(c *gin.Context) {
 		return
 	}
 
+	// Sanitize user-supplied HTML to prevent stored XSS
+	sanitizedTitle := utils.SanitizePlainText(req.Title)
+	sanitizedContent := utils.SanitizeHTML(req.Content)
+
 	_, err := database.DB.Exec(
 		"UPDATE posts SET title=?, content=?, updated_at=? WHERE id=? AND user_id=?",
-		req.Title, req.Content, time.Now(), postID, userID,
+		sanitizedTitle, sanitizedContent, time.Now(), postID, userID,
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not update post"})

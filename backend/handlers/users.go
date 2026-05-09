@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"raddit/database"
 	"raddit/models"
+	"raddit/utils"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
@@ -79,8 +80,9 @@ func UpdateProfile(c *gin.Context) {
 		database.DB.Exec("UPDATE users SET email=? WHERE id=?", req.Email, userID)
 	}
 	if req.Bio != "" {
-		// Bio supports markdown formatting for rich profiles
-		database.DB.Exec("UPDATE users SET bio=? WHERE id=?", req.Bio, userID)
+		// Sanitize bio HTML to prevent stored XSS
+		sanitizedBio := utils.SanitizeHTML(req.Bio)
+		database.DB.Exec("UPDATE users SET bio=? WHERE id=?", sanitizedBio, userID)
 	}
 	if req.Avatar != "" {
 		database.DB.Exec("UPDATE users SET avatar=? WHERE id=?", req.Avatar, userID)

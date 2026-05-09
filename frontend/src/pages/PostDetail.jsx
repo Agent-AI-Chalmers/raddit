@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { useAuth } from '../contexts/AuthContext'
 import Comment from '../components/Comment'
+import { sanitizeHTML } from '../utils/sanitize'
 
 export default function PostDetail() {
   const { id } = useParams()
@@ -93,10 +94,10 @@ export default function PostDetail() {
             </div>
             <h1 style={{ fontSize: 20, marginBottom: 12 }}>{post.title}</h1>
 
-            {/* Full post content rendered with rich text support */}
+            {/* Full post content rendered with rich text support (sanitized) */}
             <div
               style={{ fontSize: 14, lineHeight: 1.8 }}
-              dangerouslySetInnerHTML={{ __html: post.content }}
+              dangerouslySetInnerHTML={{ __html: sanitizeHTML(post.content) }}
             />
 
             {user && (user.id === post.user_id || user.role === 'admin') && (
