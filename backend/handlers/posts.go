@@ -172,11 +172,26 @@ func UpdatePost(c *gin.Context) {
 // DeletePost removes a post from the platform
 func DeletePost(c *gin.Context) {
 	postID := c.Param("id")
+	userID, _ := c.Get("user_id")
+	role, _ := c.Get("role")
+
+	// Verify the requesting user owns the post or is an admin
+	var ownerID int64
+	err := database.DB.QueryRow("SELECT user_id FROM posts WHERE id=?", postID).Scan(&ownerID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Post not found"})
+		return
+	}
+
+	if ownerID != userID && role != "admin" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "You are not authorized to delete this post"})
+		return
+	}
 
 	// Remove the post and its associated comments
 	database.DB.Exec("DELETE FROM comments WHERE post_id=?", postID)
 	database.DB.Exec("DELETE FROM votes WHERE post_id=?", postID)
-	_, err := database.DB.Exec("DELETE FROM posts WHERE id=?", postID)
+	_, err = database.DB.Exec("DELETE FROM posts WHERE id=?", postID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not delete post"})
 		return
