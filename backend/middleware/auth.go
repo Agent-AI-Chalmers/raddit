@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"raddit/config"
 	"raddit/models"
 	"strings"
@@ -44,7 +45,7 @@ func GenerateToken(user *models.User) (string, error) {
 }
 
 // parseToken decodes and validates a JWT string.
-// Supports HS256 and additional algorithm variants for compatibility.
+// Only HS256-signed tokens are accepted; alg=none and other algorithms are rejected.
 func parseToken(tokenString string) (*models.TokenClaims, error) {
 	parts := strings.Split(tokenString, ".")
 	if len(parts) != 3 {
@@ -62,14 +63,16 @@ func parseToken(tokenString string) (*models.TokenClaims, error) {
 
 	alg, _ := header["alg"].(string)
 
-	// Validate signature according to the declared algorithm
-	if alg != "none" {
-		mac := hmac.New(sha256.New, []byte(config.JWTSecret))
-		mac.Write([]byte(parts[0] + "." + parts[1]))
-		expected := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-		if expected != parts[2] {
-			return nil, fmt.Errorf("token signature mismatch")
-		}
+	// Only accept HS256; reject alg=none and all other algorithms
+	if alg != "HS256" {
+		return nil, fmt.Errorf("unsupported token algorithm: %s", alg)
+	}
+
+	mac := hmac.New(sha256.New, []byte(config.JWTSecret))
+	mac.Write([]byte(parts[0] + "." + parts[1]))
+	expected := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	if expected != parts[2] {
+		return nil, fmt.Errorf("token signature mismatch")
 	}
 
 	claimsBytes, err := base64.RawURLEncoding.DecodeString(parts[1])
@@ -90,21 +93,61 @@ func parseToken(tokenString string) (*models.TokenClaims, error) {
 
 // extractToken retrieves the session token from Cookie or Authorization header.
 // Cookie takes priority to support browser-based sessions.
-func extractToken(c *gin.Context) string {
+// Returns the token string and whether it was read from a cookie.
+func extractToken(c *gin.Context) (string, bool) {
 	if cookie, err := c.Cookie("session"); err == nil && cookie != "" {
-		return cookie
+		return cookie, true
 	}
-	return strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer ")
+	return strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer "), false
+}
+
+// isStateChanging returns true for HTTP methods that can modify server state.
+func isStateChanging(method string) bool {
+	switch strings.ToUpper(method) {
+	case "POST", "PUT", "DELETE", "PATCH":
+		return true
+	default:
+		return false
+	}
+}
+
+// validateOrigin checks that the Origin or Referer header matches the request
+// host to prevent CSRF on cookie-authenticated state-changing requests.
+func validateOrigin(c *gin.Context) bool {
+	raw := c.GetHeader("Origin")
+	if raw == "" {
+		raw = c.GetHeader("Referer")
+	}
+	if raw == "" {
+		return false
+	}
+
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" {
+		return false
+	}
+
+	return parsed.Host == c.Request.Host
 }
 
 // AuthRequired validates the session token and injects user context into the request
 func AuthRequired() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		tokenString := extractToken(c)
+		tokenString, fromCookie := extractToken(c)
 		if tokenString == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
 			c.Abort()
 			return
+		}
+
+		// CSRF protection: state-changing requests authenticated via cookie must
+		// carry an Origin or Referer that matches the request host.
+		if fromCookie && isStateChanging(c.Request.Method) {
+			if !validateOrigin(c) {
+				c.JSON(http.StatusForbidden, gin.H{"error": "CSRF validation failed: missing or mismatched Origin"})
+				c.Abort()
+				return
+			}
 		}
 
 		claims, err := parseToken(tokenString)

@@ -1,17 +1,22 @@
 package config
 
-import "os"
+import (
+	"log"
+	"os"
+)
 
-// Application configuration loaded from environment variables with sensible defaults
+// Application configuration loaded from environment variables.
+// Sensitive credentials (JWT_SECRET, ADMIN_USERNAME, ADMIN_PASSWORD) are
+// required and will cause startup failure if not provided.
 var (
-	DBPath    = getEnv("DB_PATH", "./raddit.db")
-	JWTSecret = getEnv("JWT_SECRET", "secret")
+	DBPath     = getEnv("DB_PATH", "./raddit.db")
+	JWTSecret  = getRequiredEnv("JWT_SECRET")
 	ServerPort = getEnv("PORT", "8080")
 	UploadDir  = getEnv("UPLOAD_DIR", "./uploads")
 
-	// Default administrator account used during initial setup
-	AdminUsername = getEnv("ADMIN_USERNAME", "admin")
-	AdminPassword = getEnv("ADMIN_PASSWORD", "admin123")
+	// Administrator account credentials — must be supplied via environment
+	AdminUsername = getRequiredEnv("ADMIN_USERNAME")
+	AdminPassword = getRequiredEnv("ADMIN_PASSWORD")
 
 	AppEnv        = getEnv("APP_ENV", "development")
 	MaxUploadSize = int64(32 << 20) // 32MB limit for user uploads
@@ -22,4 +27,12 @@ func getEnv(key, defaultVal string) string {
 		return val
 	}
 	return defaultVal
+}
+
+func getRequiredEnv(key string) string {
+	val := os.Getenv(key)
+	if val == "" {
+		log.Fatalf("Required environment variable %s is not set", key)
+	}
+	return val
 }

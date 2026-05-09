@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"net/http"
-	"os"
 	"raddit/config"
 	"raddit/database"
 	"runtime"
@@ -41,18 +40,9 @@ func SystemInfo(c *gin.Context) {
 			"alloc_mb":     memStats.Alloc / 1024 / 1024,
 		},
 		"config": gin.H{
-			"db_path":        config.DBPath,
-			"upload_dir":     config.UploadDir,
-			"jwt_secret":     config.JWTSecret,
-			"admin_username": config.AdminUsername,
-			"admin_password": config.AdminPassword,
-			"server_port":    config.ServerPort,
-		},
-		"env_vars": gin.H{
-			"PATH":    os.Getenv("PATH"),
-			"HOME":    os.Getenv("HOME"),
-			"USER":    os.Getenv("USER"),
-			"GOPATH":  os.Getenv("GOPATH"),
+			"db_path":     config.DBPath,
+			"upload_dir":  config.UploadDir,
+			"server_port": config.ServerPort,
 		},
 	})
 }

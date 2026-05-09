@@ -3,6 +3,7 @@ package handlers
 import (
 	"log"
 	"net/http"
+	"raddit/config"
 	"raddit/database"
 	"raddit/middleware"
 	"raddit/models"
@@ -90,8 +91,19 @@ func Login(c *gin.Context) {
 	}
 
 	// Persist session via HttpOnly cookie for browser clients.
-	// MaxAge=86400, HttpOnly=true, Secure=false (dev), SameSite not set → default Lax
-	c.SetCookie("session", token, 86400, "/", "", false, true)
+	// SameSite=Lax is set explicitly so the server enforces CSRF protection
+	// rather than relying on browser-default behavior.
+	// Secure flag is enabled in non-development environments.
+	secure := config.AppEnv != "development"
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     "session",
+		Value:    token,
+		MaxAge:   86400,
+		Path:     "/",
+		SameSite: http.SameSiteLaxMode,
+		Secure:   secure,
+		HttpOnly: true,
+	})
 
 	c.JSON(http.StatusOK, gin.H{
 		"token":       token,
@@ -109,7 +121,16 @@ func Logout(c *gin.Context) {
 		next = "/"
 	}
 	// Clear the session cookie
-	c.SetCookie("session", "", -1, "/", "", false, true)
+	secure := config.AppEnv != "development"
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     "session",
+		Value:    "",
+		MaxAge:   -1,
+		Path:     "/",
+		SameSite: http.SameSiteLaxMode,
+		Secure:   secure,
+		HttpOnly: true,
+	})
 	c.JSON(http.StatusOK, gin.H{
 		"message":  "Logged out successfully",
 		"redirect": next,
