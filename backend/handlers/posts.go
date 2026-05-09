@@ -200,20 +200,15 @@ func VotePost(c *gin.Context) {
 
 	pid, _ := strconv.ParseInt(postID, 10, 64)
 
-	// Check for existing vote
-	var existingType string
-	err := database.DB.QueryRow(
-		"SELECT vote_type FROM votes WHERE post_id=? AND user_id=?", pid, userID,
-	).Scan(&existingType)
-
-	if err == nil {
-		// Update existing vote
-		database.DB.Exec("UPDATE votes SET vote_type=? WHERE post_id=? AND user_id=?",
-			req.VoteType, pid, userID)
-	} else {
-		// Insert new vote — note: no row-level locking applied here
-		database.DB.Exec("INSERT INTO votes (post_id, user_id, vote_type) VALUES (?, ?, ?)",
-			pid, userID, req.VoteType)
+	// Upsert vote atomically — avoids TOCTOU race between SELECT check and INSERT/UPDATE
+	_, err := database.DB.Exec(
+		`INSERT INTO votes (post_id, user_id, vote_type) VALUES (?, ?, ?)
+		 ON CONFLICT(post_id, user_id) DO UPDATE SET vote_type=excluded.vote_type`,
+		pid, userID, req.VoteType,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to record vote"})
+		return
 	}
 
 	// Recalculate vote totals from the votes table
