@@ -6,7 +6,7 @@ type User struct {
 	ID        int64     `json:"id"`
 	Username  string    `json:"username"`
 	Email     string    `json:"email"`
-	Password  string    `json:"password"` // hashed credential
+	Password  string    `json:"-"` // hashed credential — never serialized to JSON
 	Bio       string    `json:"bio"`
 	Avatar    string    `json:"avatar"`
 	Role      string    `json:"role"`

@@ -62,7 +62,7 @@ export default function AdminPanel() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
               <thead>
                 <tr style={{ borderBottom: '2px solid #edeff1', background: '#f8f9fa' }}>
-                  {['ID', 'Username', 'Email', 'Password Hash', 'Role', 'Actions'].map(h => (
+                  {['ID', 'Username', 'Email', 'Role', 'Actions'].map(h => (
                     <th key={h} style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 700 }}>{h}</th>
                   ))}
                 </tr>
@@ -73,7 +73,6 @@ export default function AdminPanel() {
                     <td style={{ padding: '8px 12px' }}>{u.id}</td>
                     <td style={{ padding: '8px 12px' }}>{u.username}</td>
                     <td style={{ padding: '8px 12px' }}>{u.email}</td>
-                    <td style={{ padding: '8px 12px', fontFamily: 'monospace', fontSize: 11 }}>{u.password}</td>
                     <td style={{ padding: '8px 12px' }}>
                       <span style={{
                         background: u.role === 'admin' ? '#ffd0d6' : '#e6f3ff',

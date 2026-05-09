@@ -14,12 +14,12 @@ func GetUser(c *gin.Context) {
 	userID := c.Param("id")
 
 	row := database.DB.QueryRow(
-		"SELECT id, username, email, password, bio, avatar, role, created_at FROM users WHERE id=?",
+		"SELECT id, username, email, bio, avatar, role, created_at FROM users WHERE id=?",
 		userID,
 	)
 
 	var user models.User
-	err := row.Scan(&user.ID, &user.Username, &user.Email, &user.Password,
+	err := row.Scan(&user.ID, &user.Username, &user.Email,
 		&user.Bio, &user.Avatar, &user.Role, &user.CreatedAt)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
@@ -33,7 +33,7 @@ func GetUser(c *gin.Context) {
 // ListUsers returns all registered users (admin feature)
 func ListUsers(c *gin.Context) {
 	rows, err := database.DB.Query(
-		"SELECT id, username, email, password, bio, avatar, role, created_at FROM users ORDER BY created_at DESC",
+		"SELECT id, username, email, bio, avatar, role, created_at FROM users ORDER BY created_at DESC",
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not retrieve users"})
@@ -44,7 +44,7 @@ func ListUsers(c *gin.Context) {
 	var users []models.User
 	for rows.Next() {
 		var u models.User
-		rows.Scan(&u.ID, &u.Username, &u.Email, &u.Password, &u.Bio, &u.Avatar, &u.Role, &u.CreatedAt)
+		rows.Scan(&u.ID, &u.Username, &u.Email, &u.Bio, &u.Avatar, &u.Role, &u.CreatedAt)
 		users = append(users, u)
 	}
 
