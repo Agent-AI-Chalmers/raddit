@@ -1,15 +1,7 @@
 const BASE = '/api'
 
-function getToken() {
-  return localStorage.getItem('token')
-}
-
 function headers(extra = {}) {
-  const h = { 'Content-Type': 'application/json', ...extra }
-  // Also send Authorization header for non-browser clients; cookie handles browser sessions
-  const token = getToken()
-  if (token) h['Authorization'] = `Bearer ${token}`
-  return h
+  return { 'Content-Type': 'application/json', ...extra }
 }
 
 async function request(method, path, body) {
@@ -25,7 +17,7 @@ export const api = {
   // Auth
   login:    (body) => request('POST', '/auth/login', body),
   register: (body) => request('POST', '/auth/register', body),
-  logout:   (next) => request('GET', `/auth/logout${next ? '?next=' + next : ''}`),
+  logout:   (next) => request('POST', '/auth/logout', next ? { next } : undefined),
   me:       ()     => request('GET', '/auth/me'),
 
   // Posts
@@ -61,14 +53,13 @@ export const api = {
   adminUsers:     () => request('GET', '/admin/users'),
   adminDeleteUser:(id) => request('DELETE', `/admin/users/${id}`),
 
-  // File upload (multipart) — credentials: 'include' sends the session cookie
+  // File upload (multipart) — credentials: 'include' sends the HttpOnly session cookie
   uploadFile: async (file) => {
     const form = new FormData()
     form.append('file', file)
     const res = await fetch(BASE + '/files/upload', {
       method: 'POST',
       credentials: 'include',
-      headers: { Authorization: `Bearer ${getToken()}` },
       body: form,
     })
     const data = await res.json().catch(() => ({}))

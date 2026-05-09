@@ -3,6 +3,7 @@ package handlers
 import (
 	"log"
 	"net/http"
+	"net/url"
 	"raddit/database"
 	"raddit/middleware"
 	"raddit/models"
@@ -11,6 +12,32 @@ import (
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
 )
+
+// sanitizeRedirect ensures a redirect destination is a safe relative path.
+// Returns "/" for any absolute URL, protocol-relative URL, backslash-containing
+// path, or empty input.
+func sanitizeRedirect(next string) string {
+	if next == "" {
+		return "/"
+	}
+	// Reject absolute URLs and protocol-relative URLs
+	if strings.HasPrefix(next, "http://") || strings.HasPrefix(next, "https://") || strings.HasPrefix(next, "//") {
+		return "/"
+	}
+	// Must be a relative path starting with /
+	if !strings.HasPrefix(next, "/") {
+		return "/"
+	}
+	// Reject backslashes (browsers normalize \ to /)
+	if strings.Contains(next, `\`) {
+		return "/"
+	}
+	// Reject anything with a scheme or host component
+	if parsed, err := url.Parse(next); err == nil && (parsed.Scheme != "" || parsed.Host != "") {
+		return "/"
+	}
+	return next
+}
 
 // Register creates a new user account
 func Register(c *gin.Context) {
@@ -83,11 +110,8 @@ func Login(c *gin.Context) {
 		return
 	}
 
-	// Determine post-login destination
-	redirectTo := req.Next
-	if redirectTo == "" {
-		redirectTo = "/"
-	}
+	// Determine post-login destination (validate to prevent open redirect)
+	redirectTo := sanitizeRedirect(req.Next)
 
 	// Persist session via HttpOnly cookie for browser clients.
 	// MaxAge=86400, HttpOnly=true, Secure=false (dev), SameSite not set → default Lax
@@ -104,10 +128,13 @@ func Login(c *gin.Context) {
 
 // Logout invalidates the current session
 func Logout(c *gin.Context) {
-	next := c.Query("next")
-	if next == "" {
-		next = "/"
+	var req struct {
+		Next string `json:"next"`
 	}
+	// Best-effort parse; empty body is fine for a simple logout
+	_ = c.ShouldBindJSON(&req)
+
+	next := sanitizeRedirect(req.Next)
 	// Clear the session cookie
 	c.SetCookie("session", "", -1, "/", "", false, true)
 	c.JSON(http.StatusOK, gin.H{

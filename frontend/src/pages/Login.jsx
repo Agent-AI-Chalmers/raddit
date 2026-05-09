@@ -11,8 +11,10 @@ export default function Login() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
-  // Capture the intended destination before login for seamless navigation
-  const next = params.get('next') || '/'
+  // Capture the intended destination before login for seamless navigation.
+  // Defense-in-depth: only allow relative paths to prevent open redirect.
+  const rawNext = params.get('next') || '/'
+  const next = rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/'
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -20,9 +22,11 @@ export default function Login() {
     setLoading(true)
     try {
       const data = await api.login({ ...form, next })
-      login({ id: data.user_id, username: data.username, role: data.role }, data.token)
-      // Navigate to the redirect destination returned by the server
-      navigate(data.redirect_to || '/', { replace: true })
+      login({ id: data.user_id, username: data.username, role: data.role })
+      // Navigate to the redirect destination returned by the server.
+      // Defense-in-depth: validate the server-returned redirect is a safe relative path.
+      const redirectTo = data.redirect_to || '/'
+      navigate(redirectTo.startsWith('/') && !redirectTo.startsWith('//') ? redirectTo : '/', { replace: true })
     } catch (e) {
       setError(e.message)
     } finally {
