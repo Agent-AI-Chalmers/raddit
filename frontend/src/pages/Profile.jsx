@@ -158,6 +158,7 @@ export default function Profile() {
             <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
               <input
                 type="file"
+                accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.txt,.csv,.mp3,.mp4,.webm,.ogg,.wav,.zip,.gz,.tar"
                 onChange={e => setUploadFile(e.target.files[0])}
                 style={{ flex: 1 }}
               />

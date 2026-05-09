@@ -39,9 +39,6 @@ func main() {
 		AllowCredentials: true,
 	}))
 
-	// Serve uploaded files statically
-	r.Static("/uploads", config.UploadDir)
-
 	api := r.Group("/api")
 	{
 		// Auth endpoints — open access
@@ -86,7 +83,7 @@ func main() {
 		files := api.Group("/files")
 		{
 			files.POST("/upload", middleware.AuthRequired(), handlers.UploadFile)
-			files.GET("/download", handlers.DownloadFile)
+			files.GET("/download", middleware.AuthRequired(), handlers.DownloadFile)
 			files.GET("/list", middleware.AuthRequired(), handlers.ListFiles)
 		}
 
