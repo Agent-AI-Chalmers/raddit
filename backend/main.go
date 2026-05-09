@@ -49,7 +49,7 @@ func main() {
 		{
 			auth.POST("/register", handlers.Register)
 			auth.POST("/login", handlers.Login)
-			auth.GET("/logout", handlers.Logout)
+			auth.POST("/logout", handlers.Logout)
 			auth.GET("/me", middleware.AuthRequired(), handlers.GetMe)
 		}
 

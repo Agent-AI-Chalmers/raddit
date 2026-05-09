@@ -4,38 +4,32 @@ const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
-  const [token, setToken] = useState(() => localStorage.getItem('token'))
   const [loading, setLoading] = useState(true)
 
+  // Session is persisted via HttpOnly cookie set by the backend;
+  // no token is stored in localStorage to prevent XSS exfiltration.
   useEffect(() => {
-    if (token) {
-      fetch('/api/auth/me', {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-        .then(r => r.ok ? r.json() : Promise.reject())
-        .then(data => setUser(data))
-        .catch(() => { localStorage.removeItem('token'); setToken(null) })
-        .finally(() => setLoading(false))
-    } else {
-      setLoading(false)
-    }
-  }, [token])
+    fetch('/api/auth/me', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(data => setUser(data))
+      .catch(() => setUser(null))
+      .finally(() => setLoading(false))
+  }, [])
 
-  const login = (userData, tokenStr) => {
-    // Store token in localStorage for persistent sessions
-    localStorage.setItem('token', tokenStr)
-    setToken(tokenStr)
+  const login = (userData) => {
+    // The HttpOnly session cookie is already set by the backend response.
+    // Do not store the JWT in localStorage or JavaScript-accessible state.
     setUser(userData)
   }
 
   const logout = () => {
-    localStorage.removeItem('token')
-    setToken(null)
+    // Clear the server-side session cookie
+    fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {})
     setUser(null)
   }
 
   return (
-    <AuthContext.Provider value={{ user, token, login, logout, loading }}>
+    <AuthContext.Provider value={{ user, login, logout, loading }}>
       {children}
     </AuthContext.Provider>
   )
