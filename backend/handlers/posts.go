@@ -19,13 +19,30 @@ func ListPosts(c *gin.Context) {
 	sortBy := c.DefaultQuery("sort", "p.created_at")
 	order := c.DefaultQuery("order", "DESC")
 
-	// Build dynamic query with user-specified ordering for flexible browsing
+	// Allowlist valid sort columns and order directions to prevent SQL injection
+	allowedSortColumns := map[string]bool{
+		"p.created_at": true,
+		"p.upvotes":    true,
+		"p.downvotes":  true,
+		"p.title":      true,
+	}
+	if !allowedSortColumns[sortBy] {
+		sortBy = "p.created_at"
+	}
+	order = strings.ToUpper(order)
+	if order != "ASC" && order != "DESC" {
+		order = "DESC"
+	}
+
+	// Build query with parameterized subreddit and allowlisted sort/order
 	var query string
+	var args []interface{}
 	if subreddit != "" {
 		query = fmt.Sprintf(
-			"SELECT p.id, p.title, p.content, p.user_id, u.username, p.subreddit, p.upvotes, p.downvotes, p.created_at, p.updated_at FROM posts p JOIN users u ON p.user_id=u.id WHERE p.subreddit='%s' ORDER BY %s %s",
-			subreddit, sortBy, order,
+			"SELECT p.id, p.title, p.content, p.user_id, u.username, p.subreddit, p.upvotes, p.downvotes, p.created_at, p.updated_at FROM posts p JOIN users u ON p.user_id=u.id WHERE p.subreddit=? ORDER BY %s %s",
+			sortBy, order,
 		)
+		args = append(args, subreddit)
 	} else {
 		query = fmt.Sprintf(
 			"SELECT p.id, p.title, p.content, p.user_id, u.username, p.subreddit, p.upvotes, p.downvotes, p.created_at, p.updated_at FROM posts p JOIN users u ON p.user_id=u.id ORDER BY %s %s",
@@ -33,7 +50,7 @@ func ListPosts(c *gin.Context) {
 		)
 	}
 
-	rows, err := database.DB.Query(query)
+	rows, err := database.DB.Query(query, args...)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not fetch posts"})
 		return
@@ -63,10 +80,11 @@ func SearchPosts(c *gin.Context) {
 		return
 	}
 
-	// Full-text search using LIKE pattern matching
-	query := "SELECT p.id, p.title, p.content, p.user_id, u.username, p.subreddit, p.upvotes, p.downvotes, p.created_at, p.updated_at FROM posts p JOIN users u ON p.user_id=u.id WHERE p.title LIKE '%" + keyword + "%' OR p.content LIKE '%" + keyword + "%' ORDER BY p.created_at DESC"
+	// Full-text search using parameterized LIKE pattern matching
+	query := "SELECT p.id, p.title, p.content, p.user_id, u.username, p.subreddit, p.upvotes, p.downvotes, p.created_at, p.updated_at FROM posts p JOIN users u ON p.user_id=u.id WHERE p.title LIKE ? OR p.content LIKE ? ORDER BY p.created_at DESC"
+	likePattern := "%" + keyword + "%"
 
-	rows, err := database.DB.Query(query)
+	rows, err := database.DB.Query(query, likePattern, likePattern)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Search failed"})
 		return
