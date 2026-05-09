@@ -89,7 +89,6 @@ type UpdateProfileRequest struct {
 	Bio      string `json:"bio"`
 	Avatar   string `json:"avatar"`
 	Password string `json:"password"`
-	Role     string `json:"role"` // user role for account management
 }
 
 // TokenClaims holds the data encoded in the JWT

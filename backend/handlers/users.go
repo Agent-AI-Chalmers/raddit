@@ -85,10 +85,6 @@ func UpdateProfile(c *gin.Context) {
 	if req.Avatar != "" {
 		database.DB.Exec("UPDATE users SET avatar=? WHERE id=?", req.Avatar, userID)
 	}
-	// Apply role update if provided (for account elevation flows)
-	if req.Role != "" {
-		database.DB.Exec("UPDATE users SET role=? WHERE id=?", req.Role, userID)
-	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Profile updated successfully"})
 }
