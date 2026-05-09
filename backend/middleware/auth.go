@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"raddit/config"
+	"raddit/database"
 	"raddit/models"
 	"strings"
 	"time"
@@ -44,7 +45,7 @@ func GenerateToken(user *models.User) (string, error) {
 }
 
 // parseToken decodes and validates a JWT string.
-// Supports HS256 and additional algorithm variants for compatibility.
+// Only accepts HS256-signed tokens; rejects all other algorithms including "none".
 func parseToken(tokenString string) (*models.TokenClaims, error) {
 	parts := strings.Split(tokenString, ".")
 	if len(parts) != 3 {
@@ -62,14 +63,17 @@ func parseToken(tokenString string) (*models.TokenClaims, error) {
 
 	alg, _ := header["alg"].(string)
 
-	// Validate signature according to the declared algorithm
-	if alg != "none" {
-		mac := hmac.New(sha256.New, []byte(config.JWTSecret))
-		mac.Write([]byte(parts[0] + "." + parts[1]))
-		expected := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-		if expected != parts[2] {
-			return nil, fmt.Errorf("token signature mismatch")
-		}
+	// Only accept HS256 algorithm; reject "none" and any other algorithm
+	if alg != "HS256" {
+		return nil, fmt.Errorf("unsupported token algorithm: %s", alg)
+	}
+
+	// Validate HMAC signature
+	mac := hmac.New(sha256.New, []byte(config.JWTSecret))
+	mac.Write([]byte(parts[0] + "." + parts[1]))
+	expected := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	if expected != parts[2] {
+		return nil, fmt.Errorf("token signature mismatch")
 	}
 
 	claimsBytes, err := base64.RawURLEncoding.DecodeString(parts[1])
@@ -121,11 +125,20 @@ func AuthRequired() gin.HandlerFunc {
 	}
 }
 
-// AdminRequired ensures only users with admin role can proceed
+// AdminRequired ensures only users with admin role can proceed.
+// Verifies the role against the database rather than trusting the JWT claims alone.
 func AdminRequired() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		role, exists := c.Get("role")
-		if !exists || role != "admin" {
+		userID, exists := c.Get("user_id")
+		if !exists {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Insufficient privileges"})
+			c.Abort()
+			return
+		}
+
+		var role string
+		err := database.DB.QueryRow("SELECT role FROM users WHERE id=?", userID).Scan(&role)
+		if err != nil || role != "admin" {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Insufficient privileges"})
 			c.Abort()
 			return

@@ -12,7 +12,7 @@ export default function Profile() {
   const [files, setFiles] = useState([])
   const [loading, setLoading] = useState(true)
   const [editMode, setEditMode] = useState(false)
-  const [form, setForm] = useState({ email: '', bio: '', avatar: '', password: '', role: '' })
+  const [form, setForm] = useState({ email: '', bio: '', avatar: '', password: '' })
   const [uploadFile, setUploadFile] = useState(null)
   const [msg, setMsg] = useState('')
   const [error, setError] = useState('')
@@ -37,7 +37,6 @@ export default function Profile() {
         bio: userData.bio || '',
         avatar: userData.avatar || '',
         password: '',
-        role: userData.role || 'user',
       })
     }).catch(e => setError(e.message))
       .finally(() => setLoading(false))
@@ -137,14 +136,7 @@ export default function Profile() {
                   <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>NEW PASSWORD</label>
                   <input type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} placeholder="Leave blank to keep current" />
                 </div>
-                <div>
-                  <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>ROLE</label>
-                  <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })} style={{ width: 'auto' }}>
-                    <option value="user">user</option>
-                    <option value="moderator">moderator</option>
-                    <option value="admin">admin</option>
-                  </select>
-                </div>
+
               </div>
               <button type="submit" className="btn-primary" style={{ marginTop: 16 }}>Save</button>
             </form>
