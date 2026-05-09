@@ -1,9 +1,12 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"raddit/database"
 	"raddit/models"
 	"strconv"
@@ -225,6 +228,68 @@ func VotePost(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"upvotes": upvotes, "downvotes": downvotes})
 }
 
+// isPrivateOrReservedIP checks whether an IP address belongs to a private,
+// reserved, loopback, link-local, multicast, or unspecified range.
+func isPrivateOrReservedIP(ip net.IP) bool {
+	return ip.IsLoopback() ||
+		ip.IsPrivate() ||
+		ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() ||
+		ip.IsMulticast() ||
+		ip.IsUnspecified()
+}
+
+// validatePreviewURL checks that a URL is safe to fetch: only http/https schemes
+// are allowed, the hostname must not be an internal/literal address, and DNS
+// resolution must not yield a private or reserved IP. Returns an error if the
+// URL is rejected.
+func validatePreviewURL(ctx context.Context, rawURL string) error {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return fmt.Errorf("only http and https URLs are allowed")
+	}
+
+	hostname := parsed.Hostname()
+	if hostname == "" {
+		return fmt.Errorf("URL has no hostname")
+	}
+
+	// Block obvious internal hostnames
+	lowerHost := strings.ToLower(hostname)
+	blockedHosts := []string{
+		"localhost",
+		"metadata.google.internal",
+		"169.254.169.254",
+	}
+	for _, blocked := range blockedHosts {
+		if lowerHost == blocked {
+			return fmt.Errorf("access to internal host %q is not allowed", hostname)
+		}
+	}
+
+	// Resolve hostname and verify the IP is not in a private/reserved range.
+	// This also catches literal private IPs passed as hostnames.
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, hostname)
+	if err != nil {
+		return fmt.Errorf("could not resolve hostname: %w", err)
+	}
+	if len(ips) == 0 {
+		return fmt.Errorf("hostname resolved to no addresses")
+	}
+	for _, addr := range ips {
+		if isPrivateOrReservedIP(addr.IP) {
+			return fmt.Errorf("access to internal/private address is not allowed")
+		}
+	}
+
+	return nil
+}
+
 // PreviewURL fetches and returns a preview of an external URL for link posts
 func PreviewURL(c *gin.Context) {
 	targetURL := c.Query("url")
@@ -233,8 +298,55 @@ func PreviewURL(c *gin.Context) {
 		return
 	}
 
-	// Retrieve remote content for preview generation
-	client := &http.Client{Timeout: 10 * time.Second}
+	ctx := c.Request.Context()
+
+	// Validate the initial URL: scheme, hostname blocklist, and DNS → IP range check
+	if err := validatePreviewURL(ctx, targetURL); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "URL not allowed: " + err.Error()})
+		return
+	}
+
+	// Custom transport with DialContext that validates the resolved IP at
+	// connection time, closing the DNS-rebinding TOCTOU window.
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, fmt.Errorf("invalid address: %w", err)
+			}
+			ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+			if err != nil {
+				return nil, fmt.Errorf("DNS resolution failed: %w", err)
+			}
+			if len(ips) == 0 {
+				return nil, fmt.Errorf("no addresses for host %s", host)
+			}
+			for _, addr := range ips {
+				if isPrivateOrReservedIP(addr.IP) {
+					return nil, fmt.Errorf("connection to private/internal IP %s is not allowed", addr.IP)
+				}
+			}
+			// Use the first validated IP for the actual connection
+			return net.Dial(network, net.JoinHostPort(ips[0].IP.String(), port))
+		},
+	}
+
+	// Custom redirect policy: re-validate every redirect target so that an
+	// attacker cannot bypass IP checks by redirecting to an internal address.
+	client := &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: transport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return fmt.Errorf("too many redirects")
+			}
+			if err := validatePreviewURL(req.Context(), req.URL.String()); err != nil {
+				return fmt.Errorf("redirect target not allowed: %w", err)
+			}
+			return nil
+		},
+	}
+
 	resp, err := client.Get(targetURL)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "Could not fetch URL"})

@@ -29,6 +29,12 @@ export default function CreatePost() {
   const handlePreview = async () => {
     if (!urlToPreview) return
     try {
+      // Defense-in-depth: validate URL scheme before sending to server
+      const parsed = new URL(urlToPreview)
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        setError('Only http and https URLs are allowed')
+        return
+      }
       const data = await api.previewURL(urlToPreview)
       setPreview(data)
     } catch (e) {

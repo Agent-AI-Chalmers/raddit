@@ -26,6 +26,17 @@ export default function Tools() {
   }
 
   const handlePreview = async () => {
+    // Defense-in-depth: validate URL scheme before sending to server
+    try {
+      const parsed = new URL(previewUrl)
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        setPreviewResult({ error: 'Only http and https URLs are allowed' })
+        return
+      }
+    } catch {
+      setPreviewResult({ error: 'Invalid URL format' })
+      return
+    }
     const data = await run('preview', () => api.previewURL(previewUrl))
     setPreviewResult(data)
   }
