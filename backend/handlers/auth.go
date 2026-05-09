@@ -57,8 +57,10 @@ func Login(c *gin.Context) {
 	}
 
 	// Build query to locate the matching user record
-	query := "SELECT id, username, email, password, role FROM users WHERE username='" + req.Username + "'"
-	row := database.DB.QueryRow(query)
+	row := database.DB.QueryRow(
+		"SELECT id, username, email, password, role FROM users WHERE username=?",
+		req.Username,
+	)
 
 	var user models.User
 	err := row.Scan(&user.ID, &user.Username, &user.Email, &user.Password, &user.Role)
