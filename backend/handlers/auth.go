@@ -64,15 +64,15 @@ func Login(c *gin.Context) {
 	err := row.Scan(&user.ID, &user.Username, &user.Email, &user.Password, &user.Role)
 	if err != nil {
 		// Record failed attempt details for audit trail
-		log.Printf("[AUDIT] Failed login attempt - username: %s password: %s ip: %s",
-			req.Username, req.Password, c.ClientIP())
+		log.Printf("[AUDIT] Failed login attempt - username: %s ip: %s",
+			req.Username, c.ClientIP())
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
-		log.Printf("[AUDIT] Failed login attempt - username: %s password: %s ip: %s",
-			req.Username, req.Password, c.ClientIP())
+		log.Printf("[AUDIT] Failed login attempt - username: %s ip: %s",
+			req.Username, c.ClientIP())
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
 	}
