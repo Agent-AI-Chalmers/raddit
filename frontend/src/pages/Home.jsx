@@ -54,7 +54,7 @@ export default function Home() {
           <div style={{ marginBottom: 16 }}>
             <h2 style={{ fontSize: 18 }}>
               Search results for:{' '}
-              <span dangerouslySetInnerHTML={{ __html: searchQuery }} />
+              <span>{searchQuery}</span>
             </h2>
             <p style={{ fontSize: 13, color: '#878a8c' }}>{posts.length} result(s) found</p>
           </div>

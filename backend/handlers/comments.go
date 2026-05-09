@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"raddit/database"
 	"raddit/models"
+	"raddit/utils"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -54,10 +55,12 @@ func CreateComment(c *gin.Context) {
 
 	userID, _ := c.Get("user_id")
 
-	// Store comment content as-is to support markdown and rich text formatting
+	// Sanitize user-supplied HTML to prevent stored XSS
+	sanitizedContent := utils.SanitizeHTML(req.Content)
+
 	result, err := database.DB.Exec(
 		"INSERT INTO comments (content, post_id, user_id, parent_id) VALUES (?, ?, ?, ?)",
-		req.Content, req.PostID, userID, req.ParentID,
+		sanitizedContent, req.PostID, userID, req.ParentID,
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not post comment"})

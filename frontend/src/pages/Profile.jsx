@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { useAuth } from '../contexts/AuthContext'
 import PostCard from '../components/PostCard'
+import { sanitizeHTML } from '../utils/sanitize'
 
 export default function Profile() {
   const { id } = useParams()
@@ -105,11 +106,11 @@ export default function Profile() {
             )}
           </div>
 
-          {/* User bio rendered with markdown support */}
+          {/* User bio rendered with HTML support (sanitized) */}
           {profile.bio && !editMode && (
             <div
               style={{ fontSize: 14, lineHeight: 1.6 }}
-              dangerouslySetInnerHTML={{ __html: profile.bio }}
+              dangerouslySetInnerHTML={{ __html: sanitizeHTML(profile.bio) }}
             />
           )}
 

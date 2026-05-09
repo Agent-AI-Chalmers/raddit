@@ -2,6 +2,7 @@ import React from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { useAuth } from '../contexts/AuthContext'
+import { sanitizeHTML } from '../utils/sanitize'
 
 export default function PostCard({ post, onDelete }) {
   const { user } = useAuth()
@@ -58,10 +59,10 @@ export default function PostCard({ post, onDelete }) {
           {post.title}
         </Link>
 
-        {/* Render content preview — supports rich text */}
+        {/* Render content preview — supports rich text (sanitized) */}
         <div
           style={{ fontSize: 14, color: '#3c3c3c', marginTop: 6, maxHeight: 80, overflow: 'hidden' }}
-          dangerouslySetInnerHTML={{ __html: post.content }}
+          dangerouslySetInnerHTML={{ __html: sanitizeHTML(post.content) }}
         />
 
         <div style={{ display: 'flex', gap: 12, marginTop: 8, fontSize: 12, color: '#878a8c' }}>
