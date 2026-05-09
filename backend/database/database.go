@@ -43,7 +43,7 @@ func seedAdmin() {
 	if err != nil {
 		log.Fatal("Failed to seed admin user:", err)
 	}
-	log.Printf("Admin user created: %s / %s", config.AdminUsername, config.AdminPassword)
+	log.Printf("Admin user created: %s", config.AdminUsername)
 }
 
 func createTables() {
