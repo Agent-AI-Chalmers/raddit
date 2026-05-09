@@ -63,6 +63,14 @@ export const api = {
 
   // File upload (multipart) — credentials: 'include' sends the session cookie
   uploadFile: async (file) => {
+    // Client-side extension validation (defense-in-depth; server enforces too)
+    const allowedExts = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.pdf', '.txt', '.csv',
+      '.mp3', '.mp4', '.webm', '.ogg', '.wav', '.zip', '.gz', '.tar']
+    const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase()
+    if (!allowedExts.includes(ext)) {
+      throw new Error(`File type "${ext}" is not allowed. Allowed: ${allowedExts.join(', ')}`)
+    }
+
     const form = new FormData()
     form.append('file', file)
     const res = await fetch(BASE + '/files/upload', {
