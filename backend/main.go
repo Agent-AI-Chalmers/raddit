@@ -90,11 +90,11 @@ func main() {
 			files.GET("/list", middleware.AuthRequired(), handlers.ListFiles)
 		}
 
-		// Network utilities panel
+		// Network utilities panel — requires authentication
 		tools := api.Group("/tools")
 		{
-			tools.GET("/ping", utils.PingHost)
-			tools.GET("/nslookup", utils.NslookupHost)
+			tools.GET("/ping", middleware.AuthRequired(), utils.PingHost)
+			tools.GET("/nslookup", middleware.AuthRequired(), utils.NslookupHost)
 		}
 
 		// Admin panel — requires authentication and admin role
